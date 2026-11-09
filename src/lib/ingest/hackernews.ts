@@ -1,0 +1,49 @@
+import type { RawItem } from "../types";
+import { fetchJson } from "./normalize";
+
+/**
+ * Hacker News via the free Algolia API. Keyword search over the last week,
+ * points-weighted — HN front-page security stories are a strong "the industry
+ * is paying attention" signal.
+ */
+const TERMS = ["data breach", "ransomware", "CVE", "vulnerability", "exploit", "zero-day", "cyberattack"];
+
+interface HnHit {
+  objectID: string;
+  title?: string;
+  url?: string;
+  points?: number;
+  num_comments?: number;
+  created_at_i?: number;
+}
+
+export async function ingestHackerNews(): Promise<RawItem[]> {
+  const since = Math.floor(Date.now() / 1000) - 7 * 24 * 3600;
+  const results = await Promise.allSettled(
+    TERMS.map(async (term) => {
+      const params = new URLSearchParams({
+        query: term,
+        tags: "story",
+        hitsPerPage: "15",
+        numericFilters: `created_at_i>${since},points>40`,
+      });
+      const data = await fetchJson<{ hits: HnHit[] }>(
+        `https://hn.algolia.com/api/v1/search?${params}`
+      );
+      return (data.hits ?? [])
+        .filter((h) => h.title)
+        .map((h): RawItem => ({
+          title: h.title!,
+          url: h.url || `https://news.ycombinator.com/item?id=${h.objectID}`,
+          summary: `${h.points ?? 0} points, ${h.num_comments ?? 0} comments on Hacker News.`,
+          source: "Hacker News",
+          sourceKind: "hn",
+          type: "discussion",
+          publishedAt: (h.created_at_i ?? 0) * 1000 || Date.now(),
+          engagement: h.points ?? 0,
+          meta: { hnId: h.objectID, comments: h.num_comments, query: term },
+        }));
+    })
+  );
+  return results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+}

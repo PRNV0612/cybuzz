@@ -2,32 +2,103 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Theme lives entirely in these variables — swap this one block and the
+ * whole app re-skins. Dark editorial skin: warm charcoal paper, cream ink,
+ * muted gold accent, serif headlines.
+ */
 :root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 214, 219, 220;
-  --background-end-rgb: 255, 255, 255;
+  --bg: #1a1815;          /* warm charcoal */
+  --surface: #211f1b;
+  --surface-2: #2a2723;   /* quiet fills */
+  --border: #3b372f;      /* hairlines */
+  --rule: #332f28;        /* list dividers */
+  --text: #ece6d8;        /* cream ink */
+  --dim: #a39a88;         /* metadata tan */
+  --accent: #d9b36a;      /* editorial gold */
+  --accent-ink: #c49a4a;
+  --accent-dim: #2e2a20;  /* gold-tinted hover fill */
+
+  --sev-critical: #ff6d5e;
+  --sev-high: #ffb04d;
+  --sev-medium: #e6c65c;
+  --sev-low: #6fce8f;
+  --sev-info: #7cb7f0;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --foreground-rgb: 255, 255, 255;
-    --background-start-rgb: 0, 0, 0;
-    --background-end-rgb: 0, 0, 0;
-  }
+html {
+  background: var(--bg);
+  color: var(--text);
+  color-scheme: dark;
 }
 
 body {
-  color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-      to bottom,
-      transparent,
-      rgb(var(--background-end-rgb))
-    )
-    rgb(var(--background-start-rgb));
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
 }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
+::selection {
+  background: var(--accent);
+  color: #1a1815;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/*
+ * Feed rows: quiet list items with a severity edge. The card is the row;
+ * the lead variant gets the rule above it and bigger serif.
+ */
+.news-row {
+  border-bottom: 1px solid var(--rule);
+  transition: background 120ms ease;
+}
+.news-row:hover {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.sev-edge-critical { border-left: 3px solid var(--sev-critical); }
+.sev-edge-high     { border-left: 3px solid var(--sev-high); }
+.sev-edge-medium   { border-left: 3px solid var(--sev-medium); }
+.sev-edge-low      { border-left: 3px solid var(--sev-low); }
+.sev-edge-info     { border-left: 3px solid var(--sev-info); }
+
+/* Editorial section label */
+.section-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* Two-line clamp without plugin */
+.clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Severity theming — single source of truth alongside the palette */
+.sev-critical { color: var(--sev-critical); }
+.sev-high     { color: var(--sev-high); }
+.sev-medium   { color: var(--sev-medium); }
+.sev-low      { color: var(--sev-low); }
+.sev-info     { color: var(--sev-info); }
+
+.sev-dot {
+  background: currentColor;
+}
+
+.sev-badge {
+  border: 1px solid currentColor;
+  background: color-mix(in srgb, currentColor 8%, transparent);
 }
