@@ -14,34 +14,34 @@ export async function GET(req: Request) {
   const p = new URL(req.url).searchParams;
   const num = (k: string) => (p.get(k) ? Number(p.get(k)) : undefined);
 
-  if (p.get("view") === "stats") return NextResponse.json(getStats());
+  if (p.get("view") === "stats") return NextResponse.json(await getStats());
   if (p.get("view") === "entities")
-    return NextResponse.json(getEntityOptions(num("limit") ?? 120));
+    return NextResponse.json(await getEntityOptions(num("limit") ?? 120));
 
   const entity = p.get("entity");
   if (entity) {
-    const r = getEntity(entity);
+    const r = await getEntity(entity);
     return r ? NextResponse.json(r) : NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
   const entities = p.get("entities");
   if (entities) {
     const slugs = entities.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 20);
-    return NextResponse.json(getItemsByEntities(slugs, num("days") ?? 14, num("limit")));
+    return NextResponse.json(await getItemsByEntities(slugs, num("days") ?? 14, num("limit")));
   }
 
   const q = p.get("q")?.trim();
-  if (q) return NextResponse.json(searchItems(q, num("limit") ?? 40));
+  if (q) return NextResponse.json(await searchItems(q, num("limit") ?? 40));
 
   const view = p.get("view");
   if (view === "cves")
     return NextResponse.json(
-      getCves({ kevOnly: p.get("kev") === "1", days: num("days"), limit: num("limit") })
+      await getCves({ kevOnly: p.get("kev") === "1", days: num("days"), limit: num("limit") })
     );
-  if (view === "attacks") return NextResponse.json(getAttacks({ days: num("days"), limit: num("limit") }));
+  if (view === "attacks") return NextResponse.json(await getAttacks({ days: num("days"), limit: num("limit") }));
 
   return NextResponse.json(
-    getFeed({
+    await getFeed({
       type: (p.get("type") as never) ?? "all",
       days: num("days"),
       limit: num("limit"),

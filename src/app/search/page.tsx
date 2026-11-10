@@ -2,10 +2,10 @@ import { searchItems } from "@/lib/items";
 import { getEntityNamesByItem } from "@/lib/items";
 import NewsCard from "@/components/NewsCard";
 
-export default function SearchPage({ searchParams }: { searchParams: { q?: string } }) {
+export default async function SearchPage({ searchParams }: { searchParams: { q?: string } }) {
   const q = searchParams.q?.trim() ?? "";
-  const items = q ? searchItems(q, 40) : [];
-  const entities = getEntityNamesByItem(items.map((i) => i.id));
+  const items = q ? await searchItems(q, 40) : [];
+  const entities = await getEntityNamesByItem(items.map((i) => i.id));
 
   return (
     <div className="mx-auto max-w-4xl">

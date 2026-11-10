@@ -1,175 +1,206 @@
-import { getDb, getMeta } from "./db";
+import { query, queryOne } from "./db";
 import type { ItemRow, ItemType } from "./types";
 
 export interface FeedItem extends ItemRow {
   hot: number;
 }
 
-const HOT_SQL = `
-  (score + CASE
-    WHEN published_at > @h24 THEN 3
-    WHEN published_at > @h72 THEN 1.5
-    ELSE 0
-  END)`;
+/**
+ * Recency boost applied at read time so stored scores never go stale.
+ * Identical arithmetic to the SQLite version; `hot` is a select-list alias,
+ * which Postgres allows in ORDER BY.
+ */
+const HOT = (h24: string, h72: string) =>
+  `(score + CASE
+     WHEN published_at > ${h24} THEN 3
+     WHEN published_at > ${h72} THEN 1.5
+     ELSE 0
+   END)`;
+
+/**
+ * Placeholder builder: appending a value returns its `$n`, so the numbering can
+ * never drift out of sync with the parameter array. Values are always bound,
+ * never interpolated.
+ */
+const mk = () => {
+  const params: unknown[] = [];
+  return {
+    params,
+    add: (v: unknown) => {
+      params.push(v);
+      return `$${params.length}`;
+    },
+  };
+};
+
+const DAY = 24 * 3600_000;
 
 /** Buzz-ordered feed: stored score + recency boost applied at query time. */
-export function getFeed(opts: {
+export async function getFeed(opts: {
   type?: ItemType | "all";
   days?: number;
   limit?: number;
   offset?: number;
-} = {}): FeedItem[] {
+} = {}): Promise<FeedItem[]> {
   const now = Date.now();
-  const params: Record<string, unknown> = {
-    h24: now - 24 * 3600_000,
-    h72: now - 72 * 3600_000,
-    limit: opts.limit ?? 40,
-    offset: opts.offset ?? 0,
-  };
+  const { params, add } = mk();
+  const hot = HOT(add(now - DAY), add(now - 3 * DAY));
   let where = "1=1";
-  if (opts.type && opts.type !== "all") {
-    where += " AND type = @type";
-    params.type = opts.type;
-  }
-  if (opts.days) {
-    where += " AND published_at > @since";
-    params.since = now - opts.days * 24 * 3600_000;
-  }
-  return getDb()
-    .prepare(`SELECT *, ${HOT_SQL} AS hot FROM items WHERE ${where}
-              ORDER BY hot DESC, published_at DESC LIMIT @limit OFFSET @offset`)
-    .all(params) as FeedItem[];
+  if (opts.type && opts.type !== "all") where += ` AND type = ${add(opts.type)}`;
+  if (opts.days) where += ` AND published_at > ${add(now - opts.days * DAY)}`;
+  const limit = add(opts.limit ?? 40);
+  const offset = add(opts.offset ?? 0);
+  return query<FeedItem>(
+    `SELECT *, ${hot} AS hot FROM items WHERE ${where}
+     ORDER BY hot DESC, published_at DESC LIMIT ${limit} OFFSET ${offset}`,
+    params
+  );
 }
 
 /** Breaking strip: newest critical/high items in the last 24 h. */
-export function getTicker(limit = 12): FeedItem[] {
+export async function getTicker(limit = 12): Promise<FeedItem[]> {
   const now = Date.now();
-  return getDb()
-    .prepare(`SELECT *, ${HOT_SQL} AS hot FROM items
-              WHERE published_at > @d1 AND severity IN ('critical','high')
-              ORDER BY published_at DESC LIMIT @limit`)
-    .all({ h24: now - 24 * 3600_000, h72: now - 72 * 3600_000, d1: now - 24 * 3600_000, limit }) as FeedItem[];
+  const { params, add } = mk();
+  const hot = HOT(add(now - DAY), add(now - 3 * DAY));
+  const d1 = add(now - DAY);
+  return query<FeedItem>(
+    `SELECT *, ${hot} AS hot FROM items
+     WHERE published_at > ${d1} AND severity IN ('critical','high')
+     ORDER BY published_at DESC LIMIT ${add(limit)}`,
+    params
+  );
 }
 
-export function getCves(opts: { kevOnly?: boolean; days?: number; limit?: number } = {}): FeedItem[] {
+export async function getCves(opts: {
+  kevOnly?: boolean;
+  days?: number;
+  limit?: number;
+} = {}): Promise<FeedItem[]> {
   const now = Date.now();
-  const params: Record<string, unknown> = {
-    h24: now - 24 * 3600_000,
-    h72: now - 72 * 3600_000,
-    limit: opts.limit ?? 50,
-  };
+  const { params, add } = mk();
+  const hot = HOT(add(now - DAY), add(now - 3 * DAY));
   let where = "type = 'cve'";
   if (opts.kevOnly) where += " AND source_kind = 'kev'";
-  if (opts.days) {
-    where += " AND published_at > @since";
-    params.since = now - opts.days * 24 * 3600_000;
-  }
-  return getDb()
-    .prepare(`SELECT *, ${HOT_SQL} AS hot FROM items WHERE ${where}
-              ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
-                       published_at DESC LIMIT @limit`)
-    .all(params) as FeedItem[];
+  if (opts.days) where += ` AND published_at > ${add(now - opts.days * DAY)}`;
+  return query<FeedItem>(
+    `SELECT *, ${hot} AS hot FROM items WHERE ${where}
+     ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+              published_at DESC LIMIT ${add(opts.limit ?? 50)}`,
+    params
+  );
 }
 
-export function getAttacks(opts: { days?: number; limit?: number } = {}): FeedItem[] {
+export async function getAttacks(opts: { days?: number; limit?: number } = {}): Promise<FeedItem[]> {
   const now = Date.now();
-  return getDb()
-    .prepare(`SELECT *, ${HOT_SQL} AS hot FROM items
-              WHERE type IN ('attack','breach','ransomware') AND published_at > @since
-              ORDER BY hot DESC, published_at DESC LIMIT @limit`)
-    .all({
-      h24: now - 24 * 3600_000,
-      h72: now - 72 * 3600_000,
-      since: now - (opts.days ?? 14) * 24 * 3600_000,
-      limit: opts.limit ?? 60,
-    }) as FeedItem[];
+  const { params, add } = mk();
+  const hot = HOT(add(now - DAY), add(now - 3 * DAY));
+  const since = add(now - (opts.days ?? 14) * DAY);
+  return query<FeedItem>(
+    `SELECT *, ${hot} AS hot FROM items
+     WHERE type IN ('attack','breach','ransomware') AND published_at > ${since}
+     ORDER BY hot DESC, published_at DESC LIMIT ${add(opts.limit ?? 60)}`,
+    params
+  );
 }
 
-export function searchItems(q: string, limit = 40): FeedItem[] {
+/**
+ * ILIKE, not LIKE: SQLite's LIKE is case-insensitive for ASCII and Postgres'
+ * is not, so LIKE here would silently make search case-sensitive.
+ */
+export async function searchItems(q: string, limit = 40): Promise<FeedItem[]> {
   const now = Date.now();
-  const like = `%${q.replace(/[%_]/g, "")}%`;
-  return getDb()
-    .prepare(`SELECT *, ${HOT_SQL} AS hot FROM items
-              WHERE title LIKE @like OR summary LIKE @like OR cve_id LIKE @like
-              ORDER BY hot DESC, published_at DESC LIMIT @limit`)
-    .all({ h24: now - 24 * 3600_000, h72: now - 72 * 3600_000, like, limit }) as FeedItem[];
+  const { params, add } = mk();
+  const hot = HOT(add(now - DAY), add(now - 3 * DAY));
+  const like = add(`%${q.replace(/[%_]/g, "")}%`);
+  return query<FeedItem>(
+    `SELECT *, ${hot} AS hot FROM items
+     WHERE title ILIKE ${like} OR summary ILIKE ${like} OR cve_id ILIKE ${like}
+     ORDER BY hot DESC, published_at DESC LIMIT ${add(limit)}`,
+    params
+  );
 }
 
-export function getTopEntities(limit = 24, days = 30) {
-  return getDb()
-    .prepare(`SELECT e.id, e.slug, e.name, e.kind, COUNT(*) AS n
-              FROM entities e JOIN item_entities ie ON ie.entity_id = e.id
-              JOIN items i ON i.id = ie.item_id
-              WHERE i.published_at > @since
-              GROUP BY e.id ORDER BY n DESC LIMIT @limit`)
-    .all({ since: Date.now() - days * 24 * 3600_000, limit }) as {
-    id: number;
-    slug: string;
-    name: string;
-    kind: string;
-    n: number;
-  }[];
+export async function getTopEntities(limit = 24, days = 30) {
+  const { params, add } = mk();
+  return query<{ id: number; slug: string; name: string; kind: string; n: number }>(
+    `SELECT e.id, e.slug, e.name, e.kind, COUNT(*) AS n
+     FROM entities e JOIN item_entities ie ON ie.entity_id = e.id
+     JOIN items i ON i.id = ie.item_id
+     WHERE i.published_at > ${add(Date.now() - days * DAY)}
+     GROUP BY e.id, e.slug, e.name, e.kind ORDER BY n DESC LIMIT ${add(limit)}`,
+    params
+  );
 }
 
-export function getEntity(slug: string) {
-  const db = getDb();
-  const ent = db.prepare("SELECT * FROM entities WHERE slug = ?").get(slug) as
-    | { id: number; slug: string; name: string; kind: string }
-    | undefined;
+export async function getEntity(slug: string) {
+  const ent = await queryOne<{ id: number; slug: string; name: string; kind: string }>(
+    "SELECT * FROM entities WHERE slug = $1",
+    [slug]
+  );
   if (!ent) return null;
   const now = Date.now();
-  const items = db
-    .prepare(`SELECT *, ${HOT_SQL} AS hot FROM items
-              WHERE id IN (SELECT item_id FROM item_entities WHERE entity_id = @eid)
-              ORDER BY published_at DESC LIMIT 100`)
-    .all({ eid: ent.id, h24: now - 24 * 3600_000, h72: now - 72 * 3600_000 }) as FeedItem[];
+  const { params, add } = mk();
+  const hot = HOT(add(now - DAY), add(now - 3 * DAY));
+  const eid = add(ent.id);
+  const items = await query<FeedItem>(
+    `SELECT *, ${hot} AS hot FROM items
+     WHERE id IN (SELECT item_id FROM item_entities WHERE entity_id = ${eid})
+     ORDER BY published_at DESC LIMIT 100`,
+    params
+  );
   return { entity: ent, items };
 }
 
 /** Entity names per item, for card chips. */
-export function getEntityNamesByItem(ids: string[]): Map<string, string[]> {
+export async function getEntityNamesByItem(ids: string[]): Promise<Map<string, string[]>> {
   if (!ids.length) return new Map();
-  const rows = getDb()
-    .prepare(
-      `SELECT ie.item_id AS itemId, e.name AS name
-       FROM item_entities ie JOIN entities e ON e.id = ie.entity_id
-       WHERE ie.item_id IN (${ids.map(() => "?").join(",")})`
-    )
-    .all(...ids) as { itemId: string; name: string }[];
+  const rows = await query<{ itemId: string; name: string }>(
+    `SELECT ie.item_id AS "itemId", e.name AS name
+     FROM item_entities ie JOIN entities e ON e.id = ie.entity_id
+     WHERE ie.item_id IN (${ids.map((_, i) => `$${i + 1}`).join(",")})`,
+    ids
+  );
   const map = new Map<string, string[]>();
   for (const r of rows) map.set(r.itemId, [...(map.get(r.itemId) ?? []), r.name]);
   return map;
 }
 
 /** Fresh CISA KEV additions — federal patch deadlines in force now. */
-export function getFreshKev(days = 14, limit = 25): FeedItem[] {
+export async function getFreshKev(days = 14, limit = 25): Promise<FeedItem[]> {
   const now = Date.now();
-  return getDb()
-    .prepare(`SELECT *, ${HOT_SQL} AS hot FROM items
-              WHERE source_kind = 'kev' AND published_at > @since
-              ORDER BY published_at DESC LIMIT @limit`)
-    .all({ h24: now - 24 * 3600_000, h72: now - 72 * 3600_000, since: now - days * 24 * 3600_000, limit }) as FeedItem[];
+  const { params, add } = mk();
+  const hot = HOT(add(now - DAY), add(now - 3 * DAY));
+  const since = add(now - days * DAY);
+  return query<FeedItem>(
+    `SELECT *, ${hot} AS hot FROM items
+     WHERE source_kind = 'kev' AND published_at > ${since}
+     ORDER BY published_at DESC LIMIT ${add(limit)}`,
+    params
+  );
 }
 
 /** Exploited-or-attention: KEV entries plus CVE stories multiple outlets cluster on. */
-export function getTrendingExploited(days = 7, limit = 12): FeedItem[] {
+export async function getTrendingExploited(days = 7, limit = 12): Promise<FeedItem[]> {
   const now = Date.now();
-  return getDb()
-    .prepare(`SELECT *, ${HOT_SQL} AS hot FROM items
-              WHERE (source_kind = 'kev' AND published_at > @d30)
-                   OR (type = 'cve' AND mentions >= 2 AND published_at > @since)
-              ORDER BY hot DESC LIMIT @limit`)
-    .all({
-      h24: now - 24 * 3600_000, h72: now - 72 * 3600_000,
-      d30: now - 30 * 24 * 3600_000, since: now - days * 24 * 3600_000, limit,
-    }) as FeedItem[];
+  const { params, add } = mk();
+  const hot = HOT(add(now - DAY), add(now - 3 * DAY));
+  const d30 = add(now - 30 * DAY);
+  const since = add(now - days * DAY);
+  return query<FeedItem>(
+    `SELECT *, ${hot} AS hot FROM items
+     WHERE (source_kind = 'kev' AND published_at > ${d30})
+        OR (type = 'cve' AND mentions >= 2 AND published_at > ${since})
+     ORDER BY hot DESC LIMIT ${add(limit)}`,
+    params
+  );
 }
 
 /** Ransomware "hot streak": who is attacking, what sectors, from incident meta. */
-export function getRansomwareTrends(days = 14) {
-  const rows = getDb()
-    .prepare("SELECT meta, published_at FROM items WHERE type = 'ransomware' AND published_at > ?")
-    .all(Date.now() - days * 24 * 3600_000) as { meta: string | null; published_at: number }[];
+export async function getRansomwareTrends(days = 14) {
+  const rows = await query<{ meta: string | null }>(
+    "SELECT meta FROM items WHERE type = 'ransomware' AND published_at > $1",
+    [Date.now() - days * DAY]
+  );
   const actors = new Map<string, number>();
   const sectors = new Map<string, number>();
   for (const r of rows) {
@@ -186,46 +217,53 @@ export function getRansomwareTrends(days = 14) {
 }
 
 /** Items mentioning any of the given entity slugs — the stack watchlist. */
-export function getItemsByEntities(slugs: string[], days = 7, limit = 60): FeedItem[] {
+export async function getItemsByEntities(
+  slugs: string[],
+  days = 7,
+  limit = 60
+): Promise<FeedItem[]> {
   if (!slugs.length) return [];
   const now = Date.now();
-  const params: Record<string, unknown> = {
-    h24: now - 24 * 3600_000, h72: now - 72 * 3600_000,
-    since: now - days * 24 * 3600_000, limit,
-  };
-  const ph = slugs.map((s, i) => { params[`s${i}`] = s; return `@s${i}`; }).join(",");
-  return getDb()
-    .prepare(`SELECT DISTINCT i.*, ${HOT_SQL} AS hot FROM items i
-              JOIN item_entities ie ON ie.item_id = i.id
-              JOIN entities e ON e.id = ie.entity_id
-              WHERE e.slug IN (${ph}) AND i.published_at > @since
-              ORDER BY hot DESC LIMIT @limit`)
-    .all(params) as FeedItem[];
+  const { params, add } = mk();
+  const hot = HOT(add(now - DAY), add(now - 3 * DAY));
+  const since = add(now - days * DAY);
+  const list = slugs.map(add).join(",");
+  return query<FeedItem>(
+    `SELECT DISTINCT i.*, ${hot} AS hot FROM items i
+     JOIN item_entities ie ON ie.item_id = i.id
+     JOIN entities e ON e.id = ie.entity_id
+     WHERE e.slug IN (${list}) AND i.published_at > ${since}
+     ORDER BY hot DESC LIMIT ${add(limit)}`,
+    params
+  );
 }
 
 /** Entity names/slugs for the watchlist picker. */
-export function getEntityOptions(limit = 120) {
-  return getDb()
-    .prepare(`SELECT e.slug, e.name, e.kind, COUNT(*) AS n
-              FROM entities e JOIN item_entities ie ON ie.entity_id = e.id
-              GROUP BY e.id ORDER BY n DESC LIMIT ?`)
-    .all(limit) as { slug: string; name: string; kind: string; n: number }[];
+export async function getEntityOptions(limit = 120) {
+  return query<{ slug: string; name: string; kind: string; n: number }>(
+    `SELECT e.slug, e.name, e.kind, COUNT(*) AS n
+     FROM entities e JOIN item_entities ie ON ie.entity_id = e.id
+     GROUP BY e.slug, e.name, e.kind ORDER BY n DESC LIMIT $1`,
+    [limit]
+  );
 }
 
-export function getStats() {
-  const db = getDb();
-  const since7 = Date.now() - 7 * 24 * 3600_000;
-  const counts = db
-    .prepare("SELECT type, COUNT(*) AS n FROM items WHERE published_at > @s GROUP BY type")
-    .all({ s: since7 }) as { type: ItemType; n: number }[];
-  const total = (db.prepare("SELECT COUNT(*) AS n FROM items").get() as { n: number }).n;
-  const kevNew = (db
-    .prepare("SELECT COUNT(*) AS n FROM items WHERE source_kind = 'kev' AND published_at > @s")
-    .get({ s: since7 }) as { n: number }).n;
+export async function getStats() {
+  const since7 = Date.now() - 7 * DAY;
+  const counts = await query<{ type: ItemType; n: number }>(
+    "SELECT type, COUNT(*) AS n FROM items WHERE published_at > $1 GROUP BY type",
+    [since7]
+  );
+  const total = await queryOne<{ n: number }>("SELECT COUNT(*) AS n FROM items");
+  const kevNew = await queryOne<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM items WHERE source_kind = 'kev' AND published_at > $1",
+    [since7]
+  );
+  const last = await queryOne<{ value: string }>("SELECT value FROM meta WHERE key = 'lastIngestAt'");
   return {
     week: Object.fromEntries(counts.map((c) => [c.type, c.n])) as Record<ItemType, number>,
-    total,
-    kevNew,
-    lastIngestAt: Number(getMeta("lastIngestAt") ?? 0) || null,
+    total: total?.n ?? 0,
+    kevNew: kevNew?.n ?? 0,
+    lastIngestAt: Number(last?.value ?? 0) || null,
   };
 }

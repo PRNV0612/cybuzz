@@ -5,8 +5,8 @@ import { timeAgo } from "@/lib/time";
  * Breaking strip: the single most recent critical/high story, stated plainly.
  * Replaced the scrolling marquee — moving text failed the "easy to read" bar.
  */
-export default function Ticker() {
-  const items = getTicker(6);
+export default async function Ticker() {
+  const items = await getTicker(6);
   if (!items.length) return null;
   const lead = items[0];
 

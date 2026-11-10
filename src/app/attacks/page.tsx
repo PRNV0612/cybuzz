@@ -1,8 +1,8 @@
 import { getAttacks } from "@/lib/items";
 import NewsCard from "@/components/NewsCard";
 
-export default function AttacksPage() {
-  const items = getAttacks({ days: 14, limit: 60 });
+export default async function AttacksPage() {
+  const items = await getAttacks({ days: 14, limit: 60 });
 
   return (
     <div className="mx-auto max-w-4xl">

@@ -1,0 +1,70 @@
+name: Ingest
+
+# Scheduled ingestion into the hosted Postgres database.
+#
+# Deliberately different from the "scraper commits its output to git" pattern:
+# the database is the datastore, so this workflow needs no write access to the
+# repository at all. That means no long-lived PAT to keep secret and rotate, no
+# push step, and no repo that grows a few thousand JSON files a year.
+#
+# Note: GitHub pauses scheduled workflows in a public repo after 60 days with no
+# pushes or dispatches. This repo is active, but if it ever looks stale in the
+# app, check /api/health first and press "Run workflow" to confirm the pipeline
+# itself still works.
+
+on:
+  schedule:
+    # 04:13 / 10:13 / 16:13 UTC — roughly every 6 hours.
+    # Off the top of the hour on purpose: GitHub's scheduler is shared and
+    # :00 slots are the most congested, so whole-hour crons drift the most.
+    - cron: "13 4,10,16 * * *"
+  workflow_dispatch:
+
+# One cycle at a time. A run that started late must not overlap the next
+# scheduled one and interleave two upsert passes, and a slow run should not be
+# cancelled mid-transaction.
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+
+# This job talks to Postgres and the public internet only. It never needs the
+# GitHub token, so it gets none.
+permissions: {}
+
+jobs:
+  ingest:
+    # Forks of this repo would otherwise run the schedule against their own
+    # (missing) secret and burn their Actions minutes.
+    if: github.repository == 'PRNV0612/cybuzz'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Fails the run loudly rather than letting a missing secret surface as a
+      # confusing crash halfway through the pipeline.
+      - name: Verify configuration
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::DATABASE_URL secret is not set. Add your Neon pooled connection string in Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+      - name: Run ingest
+        run: npx tsx scripts/ingest.ts

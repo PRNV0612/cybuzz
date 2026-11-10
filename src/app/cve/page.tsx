@@ -1,9 +1,9 @@
 import { getCves } from "@/lib/items";
 import { SevDot } from "@/components/badges";
 
-export default function CvePage() {
-  const kev = getCves({ kevOnly: true, limit: 12 });
-  const recent = getCves({ days: 10, limit: 60 });
+export default async function CvePage() {
+  const kev = await getCves({ kevOnly: true, limit: 12 });
+  const recent = await getCves({ days: 10, limit: 60 });
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">

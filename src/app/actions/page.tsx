@@ -10,11 +10,11 @@ interface KevMeta {
   product?: string;
 }
 
-export default function ActionsPage() {
-  const kev = getFreshKev(14, 25);
-  const trending = getTrendingExploited(7, 12);
-  const trends = getRansomwareTrends(14);
-  const entities = getEntityNamesByItem(trending.map((i) => i.id));
+export default async function ActionsPage() {
+  const kev = await getFreshKev(14, 25);
+  const trending = await getTrendingExploited(7, 12);
+  const trends = await getRansomwareTrends(14);
+  const entities = await getEntityNamesByItem(trending.map((i) => i.id));
 
   return (
     <div className="mx-auto max-w-4xl space-y-8">

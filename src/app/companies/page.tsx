@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { getTopEntities } from "@/lib/items";
 
-export default function CompaniesPage() {
-  const entities = getTopEntities(30);
+export default async function CompaniesPage() {
+  const entities = await getTopEntities(30);
   return (
     <div className="mx-auto max-w-4xl">
       <h1 className="font-display text-[34px] font-semibold tracking-tight">

@@ -1,4 +1,4 @@
-import type { RawItem } from "../types";
+import type { AdapterResult, RawItem } from "../types";
 import { fetchJson } from "./normalize";
 
 /**
@@ -17,7 +17,7 @@ interface HnHit {
   created_at_i?: number;
 }
 
-export async function ingestHackerNews(): Promise<RawItem[]> {
+export async function ingestHackerNews(): Promise<AdapterResult> {
   const since = Math.floor(Date.now() / 1000) - 7 * 24 * 3600;
   const results = await Promise.allSettled(
     TERMS.map(async (term) => {
@@ -41,9 +41,21 @@ export async function ingestHackerNews(): Promise<RawItem[]> {
           type: "discussion",
           publishedAt: (h.created_at_i ?? 0) * 1000 || Date.now(),
           engagement: h.points ?? 0,
-          meta: { hnId: h.objectID, comments: h.num_comments, query: term },
+          meta: { hnId: h.objectID, comments: num_comments_safe(h), query: term },
         }));
     })
   );
-  return results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+
+  const items: RawItem[] = [];
+  const failures: AdapterResult["failures"] = [];
+  results.forEach((r, i) => {
+    if (r.status === "fulfilled") items.push(...r.value);
+    else failures.push({ feed: `hn:"${TERMS[i]}"`, error: String(r.reason).slice(0, 200) });
+  });
+  return { items, failures };
+}
+
+/** Algolia occasionally omits the comment count; never let it break the row. */
+function num_comments_safe(h: HnHit): number {
+  return h.num_comments ?? 0;
 }

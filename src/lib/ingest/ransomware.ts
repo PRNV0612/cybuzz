@@ -1,4 +1,4 @@
-import type { RawItem } from "../types";
+import type { AdapterResult, RawItem } from "../types";
 import { fetchJson } from "./normalize";
 
 /**
@@ -25,7 +25,7 @@ interface Victim {
   description?: string;
 }
 
-export async function ingestRansomware(): Promise<RawItem[]> {
+export async function ingestRansomware(): Promise<AdapterResult> {
   const victims = await fetchJson<Victim[]>(
     "https://api.ransomware.live/v2/recentvictims"
   );
@@ -37,7 +37,7 @@ export async function ingestRansomware(): Promise<RawItem[]> {
     /^company #\d+$/i.test(v) ||
     /^page-[a-z0-9]+$/i.test(v) ||
     /not found/i.test(v);
-  return victims
+  const items = victims
     .filter((v) => !isPlaceholder(v.victim) && (v.url || v.claim_url))
     .map((v): RawItem => ({
       title: `${v.group ?? "Unknown actor"} ransomware attack on ${v.victim}${
@@ -68,4 +68,12 @@ export async function ingestRansomware(): Promise<RawItem[]> {
         claim_url: v.claim_url,
       },
     }));
+  // Feed has real rows but every one was filtered out: the placeholder pattern
+  // or the URL fields changed, which would otherwise empty /attacks silently.
+  if (victims.length > 0 && items.length === 0) {
+    throw new Error(
+      `ransomware.live returned ${victims.length} rows and all were dropped as placeholders`
+    );
+  }
+  return { items, failures: [] };
 }

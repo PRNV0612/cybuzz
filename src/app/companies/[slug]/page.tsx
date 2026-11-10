@@ -4,14 +4,14 @@ import NewsCard from "@/components/NewsCard";
 import { TYPE_LABEL } from "@/components/badges";
 import type { ItemType } from "@/lib/types";
 
-export default function EntityDetail({ params }: { params: { slug: string } }) {
-  const data = getEntity(params.slug);
+export default async function EntityDetail({ params }: { params: { slug: string } }) {
+  const data = await getEntity(params.slug);
   if (!data) notFound();
 
   const { entity, items } = data;
   const byType = new Map<ItemType, number>();
   for (const i of items) byType.set(i.type, (byType.get(i.type) ?? 0) + 1);
-  const entities = getEntityNamesByItem(items.map((i) => i.id));
+  const entities = await getEntityNamesByItem(items.map((i) => i.id));
 
   return (
     <div className="mx-auto max-w-4xl">

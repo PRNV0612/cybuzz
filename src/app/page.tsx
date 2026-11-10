@@ -5,15 +5,15 @@ import FilterChips from "@/components/FilterChips";
 import { BUCKET_ORDER, dayBucketOf, type DayBucket } from "@/lib/time";
 import type { ItemType } from "@/lib/types";
 
-export default function FeedPage({
+export default async function FeedPage({
   searchParams,
 }: {
   searchParams: { type?: string };
 }) {
   const type = (searchParams.type as ItemType) ?? "all";
-  const items = getFeed({ type, days: 7, limit: 40 });
-  const entities = getEntityNamesByItem(items.map((i) => i.id));
-  const freshKev = getFreshKev(7, 30);
+  const items = await getFeed({ type, days: 7, limit: 40 });
+  const entities = await getEntityNamesByItem(items.map((i) => i.id));
+  const freshKev = await getFreshKev(7, 30);
 
   const [lead, ...rest] = items;
   const buckets = new Map<DayBucket, typeof items>();

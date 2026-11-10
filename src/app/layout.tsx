@@ -18,10 +18,10 @@ export const metadata: Metadata = {
     "The latest attacks, CVEs, breaches and ransomware hits, ranked by what the industry is talking about.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const stats = getStats();
+  const stats = await getStats();
   return (
     <html lang="en" className={`${inter.variable} ${mono.variable} ${display.variable}`}>
       <body className="bg-[var(--bg)] font-sans text-[var(--text)] antialiased">

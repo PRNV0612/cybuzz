@@ -1,4 +1,4 @@
-import type { RawItem } from "../types";
+import type { AdapterResult, RawItem } from "../types";
 import { fetchJson } from "./normalize";
 
 /**
@@ -27,11 +27,11 @@ interface KevCatalog {
   vulnerabilities: KevEntry[];
 }
 
-export async function ingestKev(): Promise<RawItem[]> {
+export async function ingestKev(): Promise<AdapterResult> {
   const data = await fetchJson<KevCatalog>(
     "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
   );
-  return (data.vulnerabilities ?? []).map((v): RawItem => ({
+  const items = (data.vulnerabilities ?? []).map((v): RawItem => ({
     title: `${v.cveID} — ${v.vulnerabilityName || `${v.vendorProject} ${v.product}`}`,
     url: `https://nvd.nist.gov/vuln/detail/${v.cveID}`,
     summary: v.shortDescription ?? `Actively exploited: ${v.vendorProject} ${v.product}.`,
@@ -53,4 +53,11 @@ export async function ingestKev(): Promise<RawItem[]> {
       notes: v.notes,
     },
   }));
+  // The catalog has well over 1,000 entries and grows monotonically. Anything
+  // close to zero means the schema moved under us, not that the news slowed
+  // down — fail loudly rather than quietly emptying the Action Center.
+  if (items.length < 100) {
+    throw new Error(`CISA KEV returned only ${items.length} entries — catalog shape changed`);
+  }
+  return { items, failures: [] };
 }

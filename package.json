@@ -10,15 +10,15 @@
     "ingest": "tsx scripts/ingest.ts"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.3",
+    "@types/pg": "^8.23.1",
     "drizzle-orm": "^0.45.4",
     "next": "^14.2.35",
+    "pg": "^8.23.1",
     "react": "^18",
     "react-dom": "^18",
     "rss-parser": "^3.13.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",

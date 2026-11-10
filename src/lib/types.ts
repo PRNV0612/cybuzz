@@ -47,11 +47,27 @@ export interface EntityRow {
   kind: "company" | "product";
 }
 
+/**
+ * What an adapter returns: the items it managed to collect, plus the
+ * individual feeds inside it that failed. Both matter — a source like Reddit
+ * rate-limits per subreddit, so "the adapter succeeded" is not the same claim
+ * as "the source worked". `failures` are degraded slices; a run where every
+ * adapter returned but half the feeds 429'd should be visible, not fatal.
+ */
+export interface AdapterResult {
+  items: RawItem[];
+  failures: { feed: string; error: string }[];
+}
+
 export interface IngestReport {
   fetched: number;
   inserted: number;
   updated: number;
+  linked: number;
   clustered: number;
+  /** Whole-adapter failures: the cycle could not use this source at all. */
   errors: { source: string; error: string }[];
+  /** Per-feed failures inside an adapter that otherwise succeeded. */
+  degraded: { source: string; error: string }[];
   finishedAt: number;
 }

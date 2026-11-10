@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import type { getStats } from "@/lib/items";
 import { timeAgo } from "@/lib/time";
 
-type Stats = ReturnType<typeof getStats>;
+type Stats = Awaited<ReturnType<typeof getStats>>;
 
 const NAV = [
   { href: "/", label: "The Buzz", key: "all" },
